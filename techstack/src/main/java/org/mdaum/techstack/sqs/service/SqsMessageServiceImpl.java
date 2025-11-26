@@ -17,6 +17,7 @@ import software.amazon.awssdk.services.sqs.model.*;
 
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 @Component
 public class SqsMessageServiceImpl implements SqsMessageService {
@@ -49,8 +50,6 @@ public class SqsMessageServiceImpl implements SqsMessageService {
     @Override
     public void sendMessage(SqsSampleMessage sqsSampleMessage) {
 
-
-
         Map<String, MessageAttributeValue> messageAttributeValueMap = Map.of(
                 "stringAttribute", MessageAttributeValue.builder()
                         .stringValue(sqsSampleMessage.attributes().stringAttribute())
@@ -59,17 +58,22 @@ public class SqsMessageServiceImpl implements SqsMessageService {
                         .stringValue(String.valueOf(sqsSampleMessage.attributes().numberAttribute()))
                         .dataType("Number.int").build());
 
+        SendMessageRequest sendMsgRequest;
+
         try {
-            SendMessageRequest sendMsgRequest = SendMessageRequest.builder()
+            sendMsgRequest = SendMessageRequest.builder()
                     .queueUrl(queueUrl)
                     .messageBody(ObjectMappers.GENERAL.writeValueAsString(sqsSampleMessage.payload()))
                     .messageAttributes(messageAttributeValueMap)
-                    .delaySeconds(5)
+                    .delaySeconds(0)
                     .build();
+
+            LOGGER.info("Sending SQS message {}", ObjectMappers.GENERAL.writeValueAsString(sqsSampleMessage));
         } catch (JsonProcessingException e) {
             LOGGER.error("Error serializing SQS message", e);
             throw new RuntimeException("Error serializing SQS message", e);
         }
+        sqsClient.sendMessage(sendMsgRequest);
     }
 
     @Override
@@ -79,15 +83,14 @@ public class SqsMessageServiceImpl implements SqsMessageService {
                 .maxNumberOfMessages(5)
                 .build();
 
-            return sqsClient.receiveMessage(receiveMessageRequest).messages().stream().map(
+        return sqsClient.receiveMessage(receiveMessageRequest).messages().stream().map(
                     message -> {
-                        SqsSampleMessageAttributes attributes = new SqsSampleMessageAttributes(
-                                message.attributes().get("stringAttribute"),
-                                Integer.valueOf(message.attributes().get("numberAttribute")));
                         try {
+                            LOGGER.info("Received message {}",
+                                    message.body());
                             SqsSampleMessagePayload payload = ObjectMappers.GENERAL
                                     .readValue(message.body(), SqsSampleMessagePayload.class);
-                            return new SqsSampleMessage(attributes, payload);
+                            return new SqsSampleMessage(null, payload);
                         } catch (JsonProcessingException e) {
                             LOGGER.error("Error deserializing SQS message {}", message.body(), e);
                             throw new RuntimeException("Error deserializing SQS message", e);

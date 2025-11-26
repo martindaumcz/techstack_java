@@ -22,7 +22,9 @@ extra["netflixDgsVersion"] = "10.4.0"
 
 dependencies {
 	implementation("org.springframework.boot:spring-boot-starter-data-jpa")
+    implementation("org.springframework.boot:spring-boot-starter-web")
 	implementation("org.springframework.boot:spring-boot-starter-webflux")
+    implementation("org.springframework.kafka:spring-kafka")
 	implementation("com.netflix.graphql.dgs:graphql-dgs-spring-graphql-starter")
 	//implementation("org.flywaydb:flyway-core")
 	//implementation("org.flywaydb:flyway-database-postgresql")
@@ -35,6 +37,11 @@ dependencies {
     //aws sdk
     implementation("software.amazon.awssdk:regions:2.38.2")
     implementation("software.amazon.awssdk:sqs:2.38.3")
+    implementation("software.amazon.awssdk:s3:2.38.3")
+    implementation("software.amazon.awssdk:s3-transfer-manager:2.38.3")
+
+    //reactor and kafka
+    implementation("io.projectreactor.kafka:reactor-kafka:1.3.25")
 }
 
 dependencyManagement {

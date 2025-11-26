@@ -1,4 +1,4 @@
-package org.mdaum.techstack.rest;
+package org.mdaum.techstack.sqs.controller;
 
 import org.mdaum.techstack.sqs.model.SqsSampleMessage;
 import org.mdaum.techstack.sqs.service.SqsMessageServiceImpl;
