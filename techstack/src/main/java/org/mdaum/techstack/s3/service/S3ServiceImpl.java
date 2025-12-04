@@ -9,9 +9,14 @@ import org.mdaum.techstack.util.serialization.ObjectMappers;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.core.io.buffer.DataBuffer;
+import org.springframework.core.io.buffer.DataBufferUtils;
+import org.springframework.core.io.buffer.DefaultDataBufferFactory;
 import org.springframework.http.MediaType;
+import org.springframework.http.codec.multipart.FilePart;
 import org.springframework.stereotype.Component;
 import org.springframework.web.multipart.MultipartFile;
+import reactor.core.publisher.Flux;
 import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.core.sync.ResponseTransformer;
 import software.amazon.awssdk.http.ContentStreamProvider;
@@ -20,12 +25,13 @@ import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.GetObjectRequest;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.SequenceInputStream;
+import java.io.*;
+import java.nio.ByteBuffer;
+import java.nio.channels.Channels;
 import java.nio.file.Path;
 import java.util.Collections;
 import java.util.List;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 @Component
@@ -86,24 +92,60 @@ public class S3ServiceImpl implements S3Service {
     }
 
     @Override
-    public void uploadMultipartFile(S3Request s3UploadObjectRequest, MultipartFile[] files) {
+    public void uploadMultipartFileReactive(S3Request s3UploadObjectRequest, Flux<FilePart> filesFlux) {
 
+        throw new RuntimeException("Not implemented yet");
+
+//        String targetPath = getS3PathStringFromConfigAndS3Request(s3UploadObjectRequest);
+//
+//        PipedOutputStream osPipe = new PipedOutputStream();
+//        PipedInputStream isPipe;
+//
+//        try {
+//            isPipe = new PipedInputStream(osPipe);
+//        } catch (IOException e) {
+//            throw new RuntimeException(e);
+//        }
+//
+//        RequestBody body = RequestBody.fromContentProvider(
+//                ContentStreamProvider.fromInputStream(isPipe), MediaType.APPLICATION_OCTET_STREAM_VALUE);
+//
+//        s3Client.putObject(b -> b.bucket(s3ConfigurationProperties.bucketName()).key(targetPath), body);
+//
+//        LOGGER.info("Uploading multipart into {}/{}", s3ConfigurationProperties.bucketName(), targetPath);
+//
+//        Flux<InputStream> fluxInputStreams = filesFlux.flatMap(filePart ->
+//                filePart.content().map(dataBuffer ->
+//                    dataBuffer.asInputStream())
+//        ).doOnNext(
+//                is -> {
+//                    try {
+//                        is.transferTo(osPipe);
+//                    } catch (IOException e) {
+//                        throw new RuntimeException(e);
+//                    }
+//                }
+//        );
+    }
+
+    @Override
+    public void uploadMultipartFile(S3Request s3UploadObjectRequest, MultipartFile[] files) {
         String targetPath = getS3PathStringFromConfigAndS3Request(s3UploadObjectRequest);
 
-        LOGGER.info("Uploading multipart into {}/{}, size: {}", s3ConfigurationProperties.bucketName(), targetPath, files.length);
-
-        List<InputStream> inputStreams = Stream.of(files).map(mpf -> {
+        List<InputStream> multipartFileInputStreams = List.of(files).stream().map(file -> {
             try {
-                return mpf.getInputStream();
+                return file.getInputStream();
             } catch (IOException e) {
                 LOGGER.error("IOException uploading file stream to {}/{}", s3ConfigurationProperties.bucketName(), targetPath, e);
                 throw new RuntimeException(e);
             }
         }).toList();
 
-        SequenceInputStream multipartsJoinedStream = new SequenceInputStream(Collections.enumeration(inputStreams));
+        SequenceInputStream multipartsJoinedStream = new SequenceInputStream(Collections.enumeration(multipartFileInputStreams));
         RequestBody body = RequestBody.fromContentProvider(
                 ContentStreamProvider.fromInputStream(multipartsJoinedStream), MediaType.APPLICATION_OCTET_STREAM_VALUE);
+
+        LOGGER.info("Uploading multipart into {}/{}", s3ConfigurationProperties.bucketName(), targetPath);
 
         s3Client.putObject(b -> b.bucket(s3ConfigurationProperties.bucketName()).key(targetPath), body);
     }
@@ -119,7 +161,10 @@ public class S3ServiceImpl implements S3Service {
 
         try {
             // Returns the InputStream directly from S3 without loading entire file into memory
-            return s3Client.getObject(getObjectRequest, ResponseTransformer.toInputStream());
+
+            InputStream inputStream = s3Client.getObject(getObjectRequest, ResponseTransformer.toInputStream());
+            return inputStream;
+
         } catch (Exception e) {
             LOGGER.error("Error retrieving object from s3://{}/{}",
                     s3ConfigurationProperties.bucketName(), targetPath, e);

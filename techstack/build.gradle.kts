@@ -22,7 +22,7 @@ extra["netflixDgsVersion"] = "10.4.0"
 
 dependencies {
 	implementation("org.springframework.boot:spring-boot-starter-data-jpa")
-    implementation("org.springframework.boot:spring-boot-starter-web")
+    //implementation("org.springframework.boot:spring-boot-starter-web")
 	implementation("org.springframework.boot:spring-boot-starter-webflux")
     implementation("org.springframework.kafka:spring-kafka")
 	implementation("com.netflix.graphql.dgs:graphql-dgs-spring-graphql-starter")
