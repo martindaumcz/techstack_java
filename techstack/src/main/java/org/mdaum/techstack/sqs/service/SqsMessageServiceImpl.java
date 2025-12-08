@@ -11,6 +11,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
+import software.amazon.awssdk.auth.credentials.AwsCredentialsProvider;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.sqs.SqsClient;
 import software.amazon.awssdk.services.sqs.model.*;
@@ -28,9 +29,10 @@ public class SqsMessageServiceImpl implements SqsMessageService {
     private final String queueUrl;
 
     @Autowired
-    public SqsMessageServiceImpl(SqsConfiguration sqsConfiguration, Region region) {
+    public SqsMessageServiceImpl(SqsConfiguration sqsConfiguration, Region region, AwsCredentialsProvider awsCredentialsProvider) {
         sqsClient = SqsClient.builder()
                 .region(region)
+                .credentialsProvider(awsCredentialsProvider)
                 .build();
 
         CreateQueueRequest request = CreateQueueRequest.builder()

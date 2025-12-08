@@ -94,38 +94,38 @@ public class S3ServiceImpl implements S3Service {
     @Override
     public void uploadMultipartFileReactive(S3Request s3UploadObjectRequest, Flux<FilePart> filesFlux) {
 
-        throw new RuntimeException("Not implemented yet");
+        String targetPath = getS3PathStringFromConfigAndS3Request(s3UploadObjectRequest);
 
-//        String targetPath = getS3PathStringFromConfigAndS3Request(s3UploadObjectRequest);
+        PipedOutputStream osPipe = new PipedOutputStream();
+        PipedInputStream isPipe;
+
+        try {
+            isPipe = new PipedInputStream(osPipe);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+
+        RequestBody body = RequestBody.fromContentProvider(
+                ContentStreamProvider.fromInputStream(isPipe), MediaType.APPLICATION_OCTET_STREAM_VALUE);
+
+        s3Client.putObject(b -> b.bucket(s3ConfigurationProperties.bucketName()).key(targetPath), body);
+
+        LOGGER.info("Uploading multipart into {}/{}", s3ConfigurationProperties.bucketName(), targetPath);
+
+        Flux<InputStream> fluxInputStreams = filesFlux.flatMap(filePart ->
+                filePart.content().map(dataBuffer ->
+                    dataBuffer.asInputStream())
+        ).doOnNext(
+                is -> {
+                    try {
+                        is.transferTo(osPipe);
+                    } catch (IOException e) {
+                        throw new RuntimeException(e);
+                    }
+                }
+        );
 //
-//        PipedOutputStream osPipe = new PipedOutputStream();
-//        PipedInputStream isPipe;
-//
-//        try {
-//            isPipe = new PipedInputStream(osPipe);
-//        } catch (IOException e) {
-//            throw new RuntimeException(e);
-//        }
-//
-//        RequestBody body = RequestBody.fromContentProvider(
-//                ContentStreamProvider.fromInputStream(isPipe), MediaType.APPLICATION_OCTET_STREAM_VALUE);
-//
-//        s3Client.putObject(b -> b.bucket(s3ConfigurationProperties.bucketName()).key(targetPath), body);
-//
-//        LOGGER.info("Uploading multipart into {}/{}", s3ConfigurationProperties.bucketName(), targetPath);
-//
-//        Flux<InputStream> fluxInputStreams = filesFlux.flatMap(filePart ->
-//                filePart.content().map(dataBuffer ->
-//                    dataBuffer.asInputStream())
-//        ).doOnNext(
-//                is -> {
-//                    try {
-//                        is.transferTo(osPipe);
-//                    } catch (IOException e) {
-//                        throw new RuntimeException(e);
-//                    }
-//                }
-//        );
+//        throw new RuntimeException("Not implemented yet");
     }
 
     @Override

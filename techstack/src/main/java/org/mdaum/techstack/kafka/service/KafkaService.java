@@ -9,6 +9,7 @@ import java.util.Optional;
 public interface KafkaService {
 
     void produceKafkaMessage(KafkaInputMessageDto kafkaMessage);
+    void produceKafkaMessages(Flux<KafkaInputMessageDto> kafkaInputMessageDtoFlux);
     List<KafkaOutputMessageDto> getKafkaMessages(String topic, int maxMessages);
     Flux<KafkaOutputMessageDto> streamKafkaMessagesByTopics(List<String> topic, Optional<String> consumerGroup, int maxMessages);
     void createKafkaTopics(List<KafkaTopicDto> kafkaTopics);

@@ -3,20 +3,28 @@ package org.mdaum.techstack.kafka.service;
 import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.admin.NewTopic;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
+import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.logging.log4j.util.Strings;
 import org.mdaum.techstack.kafka.configuration.KafkaConsumerBaseConfig;
+import org.mdaum.techstack.kafka.configuration.KafkaProducerBaseConfig;
 import org.mdaum.techstack.kafka.model.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.kafka.core.KafkaAdmin;
 import org.springframework.kafka.core.KafkaTemplate;
+import org.springframework.kafka.core.ProducerFactory;
+import org.springframework.kafka.support.SendResult;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 import reactor.core.publisher.Flux;
 import reactor.kafka.receiver.KafkaReceiver;
 import reactor.kafka.receiver.ReceiverOptions;
 import reactor.kafka.receiver.ReceiverRecord;
+import reactor.kafka.sender.KafkaSender;
+import reactor.kafka.sender.SenderOptions;
+import reactor.kafka.sender.SenderRecord;
+import reactor.kafka.sender.SenderResult;
 
 import java.util.*;
 import java.util.concurrent.ExecutionException;
@@ -27,6 +35,7 @@ public class KafkaServiceImpl implements KafkaService{
     private static final Logger LOGGER = LoggerFactory.getLogger(KafkaServiceImpl.class);
 
     private KafkaConsumerBaseConfig kafkaConsumerBaseConfig;
+    private KafkaProducerBaseConfig kafkaProducerBaseConfig;
     private AdminClient kafkaAdminClient;
     private KafkaTemplate<String, String> kafkaTemplate;
 
@@ -34,19 +43,48 @@ public class KafkaServiceImpl implements KafkaService{
     public KafkaServiceImpl(
             KafkaConsumerBaseConfig kafkaConsumerBaseConfig,
             AdminClient kafkaAdminClient,
-            KafkaTemplate<String, String> kafkaTemplate) {
+            KafkaTemplate<String, String> kafkaTemplate,
+            KafkaProducerBaseConfig kafkaProducerBaseConfig) {
         this.kafkaConsumerBaseConfig = kafkaConsumerBaseConfig;
         this.kafkaAdminClient = kafkaAdminClient;
         this.kafkaTemplate = kafkaTemplate;
+        this.kafkaProducerBaseConfig = kafkaProducerBaseConfig;
     }
 
     @Override
     public void produceKafkaMessage(KafkaInputMessageDto kafkaMessage) {
-        if (Strings.isEmpty(kafkaMessage.key())) {
-            kafkaTemplate.send(kafkaMessage.topic(), kafkaMessage.content());
-        } else {
-            kafkaTemplate.send(kafkaMessage.topic(), kafkaMessage.key(), kafkaMessage.content());
+
+        SendResult<String, String> sendResult;
+
+        try {
+            if (Strings.isEmpty(kafkaMessage.key())) {
+                sendResult = kafkaTemplate.send(kafkaMessage.topic(), kafkaMessage.content()).get();
+            } else {
+                sendResult = kafkaTemplate.send(kafkaMessage.topic(), kafkaMessage.key(), kafkaMessage.content()).get();
+            }
+        } catch (InterruptedException | ExecutionException e) {
+            throw new RuntimeException(e);
         }
+    }
+
+    @Override
+    public void produceKafkaMessages(Flux<KafkaInputMessageDto> kafkaInputMessageDtoFlux) {
+        SenderOptions<String, Object> senderOptions = SenderOptions.create(kafkaProducerBaseConfig.createConfigurationMap());
+
+        KafkaSender<String, Object> kafkaSender = KafkaSender.create(senderOptions);
+
+        kafkaSender.send(kafkaInputMessageDtoFlux
+                        .doOnNext(next -> LOGGER.info("Sending input message for topic [{}]: {}:{}", next.topic(), next.key(), next.content()))
+                        .map(dto -> SenderRecord.create(
+                                new ProducerRecord<>(dto.topic(),
+                                        null,
+                                        System.currentTimeMillis(),
+                                        dto.key(),
+                                        dto.content()),
+                                dto.key()
+                        )))
+                .doOnNext(next -> LOGGER.info("Sent input message to topic: {}", next.recordMetadata().topic()))
+                .subscribe();
     }
 
     @Override

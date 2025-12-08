@@ -9,6 +9,7 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Import;
 import org.springframework.web.reactive.config.EnableWebFlux;
 
+
 @SpringBootApplication(
         scanBasePackages = {"org.mdaum.techstack"},
         exclude = {DataSourceAutoConfiguration.class})

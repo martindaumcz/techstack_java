@@ -4,6 +4,7 @@ import org.mdaum.techstack.kafka.model.KafkaInputMessageDto;
 import org.mdaum.techstack.kafka.model.KafkaOutputMessageDto;
 import org.mdaum.techstack.kafka.service.KafkaService;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.*;
 import reactor.core.publisher.Flux;
@@ -22,13 +23,20 @@ public class KafkaMessagesController {
         this.kafkaService = kafkaService;
     }
 
-    @PostMapping
+    @ResponseStatus(HttpStatus.OK)
+    @PostMapping("produce-single")
     public void produceKafkaMessage(@RequestBody KafkaInputMessageDto kafkaInputMessageDto) {
         kafkaService.produceKafkaMessage(kafkaInputMessageDto);
     }
 
-    @GetMapping(produces = MediaType.APPLICATION_NDJSON_VALUE)
-    @RequestMapping("stream/by-topic")
+    @ResponseStatus(HttpStatus.OK)
+    @PostMapping(value = "produce-multiple", consumes = MediaType.APPLICATION_NDJSON_VALUE)
+    public void produceKafkaMessages(@RequestBody Flux<KafkaInputMessageDto> kafkaInputMessageDtoFlux) {
+        kafkaService.produceKafkaMessages(kafkaInputMessageDtoFlux);
+    }
+
+    @GetMapping(path="stream/by-topic", produces = MediaType.APPLICATION_NDJSON_VALUE)
+    @ResponseBody
     public Flux<KafkaOutputMessageDto> streamKafkaMessagesByTopic(
             @RequestParam("topicNames") List<String> topicNames,
             @RequestParam(value = "consumerGroup", required = false) String consumerGroup,
