@@ -12,6 +12,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Bean;
 import org.springframework.test.context.TestPropertySource;
 import reactor.core.publisher.Flux;
+import reactor.test.StepVerifier;
 
 import java.util.Collections;
 import java.util.List;
@@ -33,26 +34,25 @@ public class KafkaTests {
     }
 
     @Test
-    public void dummyTest() {
+    public void kafkaProduceConsumerTest() {
 
     }
 
 
     @Test
-    void kafkaFluxTest() throws InterruptedException {
-
-        LOGGER.info("Application is up, waiting 10s before sending msgs");
-        Thread.sleep(10000);
-
+    void kafkaFluxProduceConsumeTest() throws InterruptedException {
 
         Flux<KafkaOutputMessageDto> outputMessageFlux = kafkaService.streamKafkaMessagesByTopics(
                 Collections.singletonList("mdaum-topic-001"),
                 Optional.empty(),
                 2).doOnNext(next -> LOGGER.info("Output message for topic [{}]: {}:{}", next.topic(), next.key(), next.content()));
 
-        outputMessageFlux.subscribe();
+        StepVerifier.create(outputMessageFlux)
+                .expectNextCount(2)
+                .expectComplete()
+                .verify();
 
-        Thread.sleep(1000);
+        outputMessageFlux.subscribe();
 
         KafkaInputMessageDto dto1 = new KafkaInputMessageDto("my-key-001", "mdaum-topic-001", "verga 1");
         KafkaInputMessageDto dto2 = new KafkaInputMessageDto("my-key-001", "mdaum-topic-001", "verga 2");
@@ -60,10 +60,6 @@ public class KafkaTests {
         Flux<KafkaInputMessageDto> inputMessageFlux = Flux.fromIterable(List.of(dto1, dto2));
 
         kafkaService.produceKafkaMessages(inputMessageFlux);
-
-        LOGGER.info("Application is up, waiting 10s before sending msgs");
-        Thread.sleep(10000);
-
     }
 
 

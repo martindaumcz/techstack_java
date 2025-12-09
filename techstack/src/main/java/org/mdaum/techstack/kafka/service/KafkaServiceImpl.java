@@ -3,6 +3,7 @@ package org.mdaum.techstack.kafka.service;
 import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.admin.NewTopic;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
+import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.logging.log4j.util.Strings;
 import org.mdaum.techstack.kafka.configuration.KafkaConsumerBaseConfig;
@@ -26,6 +27,7 @@ import reactor.kafka.sender.SenderOptions;
 import reactor.kafka.sender.SenderRecord;
 import reactor.kafka.sender.SenderResult;
 
+import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.ExecutionException;
 
@@ -88,8 +90,19 @@ public class KafkaServiceImpl implements KafkaService{
     }
 
     @Override
-    public List<KafkaOutputMessageDto> getKafkaMessages(String topic, int maxMessages) {
-        return List.of();
+    public List<KafkaOutputMessageDto> getKafkaMessages(List<String> topics, Optional<String> consumerGroup, int maxMessages) {
+
+        Map<String, Object> consumerBaseConfigMap = kafkaConsumerBaseConfig.createConfigurationMap();
+        consumerBaseConfigMap.put(
+                ConsumerConfig.GROUP_ID_CONFIG,
+                consumerGroup.orElse(UUID.randomUUID().toString()));
+
+        KafkaConsumer<String, String> kafkaConsumer = new KafkaConsumer<>(consumerBaseConfigMap);
+        kafkaConsumer.subscribe(topics);
+
+        kafkaConsumer.poll(Duration.ofSeconds(10)).iterator();
+
+        throw new RuntimeException("Not implemented yet");
     }
 
     @Override
