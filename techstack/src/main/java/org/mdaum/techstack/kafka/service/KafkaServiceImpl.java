@@ -3,6 +3,8 @@ package org.mdaum.techstack.kafka.service;
 import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.admin.NewTopic;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
+import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.logging.log4j.util.Strings;
@@ -70,7 +72,7 @@ public class KafkaServiceImpl implements KafkaService{
     }
 
     @Override
-    public void produceKafkaMessages(Flux<KafkaInputMessageDto> kafkaInputMessageDtoFlux) {
+    public void produceKafkaMessageFlux(Flux<KafkaInputMessageDto> kafkaInputMessageDtoFlux) {
         SenderOptions<String, Object> senderOptions = SenderOptions.create(kafkaProducerBaseConfig.createConfigurationMap());
 
         KafkaSender<String, Object> kafkaSender = KafkaSender.create(senderOptions);
@@ -90,28 +92,90 @@ public class KafkaServiceImpl implements KafkaService{
     }
 
     @Override
-    public List<KafkaOutputMessageDto> getKafkaMessages(List<String> topics, Optional<String> consumerGroup, int maxMessages) {
+    public void produceKafkaMessages(List<KafkaInputMessageDto> kafkaInputMessageDtos) {
+
+        kafkaInputMessageDtos.forEach(kafkaMessage -> {
+
+            try {
+                if (Strings.isEmpty(kafkaMessage.key())) {
+                    kafkaTemplate.send(kafkaMessage.topic(), kafkaMessage.content()).get();
+                    LOGGER.info("Produced kafka message without key");
+                } else {
+                    kafkaTemplate.send(kafkaMessage.topic(), kafkaMessage.key(), kafkaMessage.content()).get();
+                    LOGGER.info("Produced kafka message with key");
+                }
+            } catch (InterruptedException | ExecutionException e) {
+                LOGGER.error("Failed to send kafka message", e);
+            }
+        });
+    }
+
+    @Override
+    public List<KafkaOutputMessageDto> getKafkaMessages(
+            List<String> topics,
+            Optional<String> consumerGroup,
+            boolean fromBeginning,
+            int pollTimeoutSeconds) {
 
         Map<String, Object> consumerBaseConfigMap = kafkaConsumerBaseConfig.createConfigurationMap();
+
+        String consumerGroupStr = consumerGroup.orElse(UUID.randomUUID().toString());
+
         consumerBaseConfigMap.put(
                 ConsumerConfig.GROUP_ID_CONFIG,
-                consumerGroup.orElse(UUID.randomUUID().toString()));
+                consumerGroupStr);
+
+        if (fromBeginning) {
+            consumerBaseConfigMap.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
+        }
 
         KafkaConsumer<String, String> kafkaConsumer = new KafkaConsumer<>(consumerBaseConfigMap);
         kafkaConsumer.subscribe(topics);
 
-        kafkaConsumer.poll(Duration.ofSeconds(10)).iterator();
+        List<KafkaOutputMessageDto> outputMsgs = new ArrayList<>();
 
-        throw new RuntimeException("Not implemented yet");
+        if (fromBeginning) {
+            LOGGER.info("Getting topics {} from beginning", topics);
+            kafkaConsumer.poll(Duration.ofSeconds(0));
+            kafkaConsumer.seekToBeginning(kafkaConsumer.assignment());
+        }
+
+        ConsumerRecords<String, String> consumerRecords = kafkaConsumer.poll(Duration.ofSeconds(pollTimeoutSeconds));
+
+        LOGGER.info("Poll has new messages: {}", consumerRecords.count());
+
+        consumerRecords.forEach(record -> {
+
+                LOGGER.info("Consumed message {}:{} from topic {}",
+                        record.key(),
+                        record.value(),
+                        record.topic());
+                outputMsgs.add(new KafkaOutputMessageDto(
+                        record.key(),
+                        record.topic(),
+                        record.value(),
+                        null,
+                        consumerGroupStr));
+        });
+
+        return outputMsgs;
     }
 
     @Override
-    public Flux<KafkaOutputMessageDto> streamKafkaMessagesByTopics(List<String> topics, Optional<String> consumerGroup, int maxMessages) {
+    public Flux<KafkaOutputMessageDto> streamKafkaMessagesByTopics(
+            List<String> topics,
+            Optional<String> consumerGroup,
+            boolean fromBeginning,
+            int pollTimeoutSeconds) {
 
         Map<String, Object> consumerBaseConfigMap = kafkaConsumerBaseConfig.createConfigurationMap();
         consumerBaseConfigMap.put(
                 ConsumerConfig.GROUP_ID_CONFIG,
                 consumerGroup.orElse(UUID.randomUUID().toString()));
+
+        if (fromBeginning) {
+            consumerBaseConfigMap.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
+        }
 
         ReceiverOptions<Object, Object> receiverOptions = ReceiverOptions.create(consumerBaseConfigMap)
                 .subscription(topics);
@@ -128,6 +192,8 @@ public class KafkaServiceImpl implements KafkaService{
                                 kafkaOutputMessageDto.key(),
                                 kafkaOutputMessageDto.content(),
                                 kafkaOutputMessageDto.topic()));
+
+        LOGGER.info("Returning output flux");
 
         return outputMsgFlux;
     }

@@ -9,9 +9,10 @@ import java.util.Optional;
 public interface KafkaService {
 
     void produceKafkaMessage(KafkaInputMessageDto kafkaMessage);
-    void produceKafkaMessages(Flux<KafkaInputMessageDto> kafkaInputMessageDtoFlux);
-    List<KafkaOutputMessageDto> getKafkaMessages(List<String> topics, Optional<String> consumerGroup, int maxMessages);
-    Flux<KafkaOutputMessageDto> streamKafkaMessagesByTopics(List<String> topic, Optional<String> consumerGroup, int maxMessages);
+    void produceKafkaMessages(List<KafkaInputMessageDto> kafkaInputMessageDtos);
+    void produceKafkaMessageFlux(Flux<KafkaInputMessageDto> kafkaInputMessageDtoFlux);
+    List<KafkaOutputMessageDto> getKafkaMessages(List<String> topics, Optional<String> consumerGroup, boolean fromBeginning, int pollTimeoutSeconds);
+    Flux<KafkaOutputMessageDto> streamKafkaMessagesByTopics(List<String> topic, Optional<String> consumerGroup, boolean fromBeginning, int pollTimeoutSeconds);
     void createKafkaTopics(List<KafkaTopicDto> kafkaTopics);
     void deleteKafkaTopics(List<String> topicNames);
     List<KafkaTopicDescriptionDto> getKafkaTopics(boolean internal);

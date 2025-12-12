@@ -1,40 +1,64 @@
 package org.mdaum.techstack;
 
 import org.junit.jupiter.api.Test;
-import org.mdaum.techstack.configuration.KafkaTestConfiguration;
 import org.mdaum.techstack.kafka.model.KafkaInputMessageDto;
 import org.mdaum.techstack.kafka.model.KafkaOutputMessageDto;
 import org.mdaum.techstack.kafka.service.KafkaService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.web.client.RestClientTest;
+import org.springframework.boot.test.autoconfigure.web.reactive.AutoConfigureWebTestClient;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Bean;
+import org.springframework.http.HttpStatusCode;
+import org.springframework.http.MediaType;
 import org.springframework.test.context.TestPropertySource;
+import org.springframework.test.web.reactive.server.WebTestClient;
 import reactor.core.publisher.Flux;
 import reactor.test.StepVerifier;
 
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.*;
 
-@SpringBootTest
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@AutoConfigureWebTestClient
 @TestPropertySource(locations = {"/application.properties", "/credentials.properties"})
-public class KafkaTests {
+public class KafkaSpringBootTests {
 
-    private static Logger LOGGER = LoggerFactory.getLogger(KafkaTests.class);
+    private static Logger LOGGER = LoggerFactory.getLogger(KafkaSpringBootTests.class);
 
     @Autowired
     private KafkaService kafkaService;
 
-    @Bean("testBean")
-    public String testBean() {
-        LOGGER.info("test bean being created");
-        return "blablabla";
-    }
-
     @Test
-    public void kafkaProduceConsumerTest() {
+    public void kafkaProduceConsumeTest(@Autowired WebTestClient webClient) {
+
+        KafkaInputMessageDto dto1 = new KafkaInputMessageDto("my-key-001", "mdaum-topic-001", "verga 1");
+        KafkaInputMessageDto dto2 = new KafkaInputMessageDto("my-key-001", "mdaum-topic-001", "verga 2");
+
+        CompletableFuture<Void> webClientGet = CompletableFuture.runAsync(() -> {
+            WebTestClient.BodyContentSpec spec = webClient.get()
+                    .uri("/kafka/messages/get/by-topic?topicNames=mdaum-topic-001&pollTimeoutSeconds=10")
+                    .exchange()
+                    .expectStatus().isOk()
+                    .expectBody().jsonPath("$[*]").isNotEmpty();
+
+            LOGGER.info("Received messages: {}", spec.returnResult().getResponseBody());
+        }, Executors.newSingleThreadExecutor());
+
+        HttpStatusCode statusCode = webClient.post()
+                .uri("/kafka/messages/produce-multiple")
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(List.of(dto1, dto2))
+                .exchange()
+                .expectStatus().isOk()
+                .returnResult(Void.class)
+                .getStatus();
+
+        webClientGet.orTimeout(15, TimeUnit.SECONDS);
 
     }
 
@@ -45,7 +69,8 @@ public class KafkaTests {
         Flux<KafkaOutputMessageDto> outputMessageFlux = kafkaService.streamKafkaMessagesByTopics(
                 Collections.singletonList("mdaum-topic-001"),
                 Optional.empty(),
-                2).doOnNext(next -> LOGGER.info("Output message for topic [{}]: {}:{}", next.topic(), next.key(), next.content()));
+                false,
+                5).doOnNext(next -> LOGGER.info("Output message for topic [{}]: {}:{}", next.topic(), next.key(), next.content()));
 
         StepVerifier.create(outputMessageFlux)
                 .expectNextCount(2)
@@ -59,7 +84,7 @@ public class KafkaTests {
 
         Flux<KafkaInputMessageDto> inputMessageFlux = Flux.fromIterable(List.of(dto1, dto2));
 
-        kafkaService.produceKafkaMessages(inputMessageFlux);
+        kafkaService.produceKafkaMessageFlux(inputMessageFlux);
     }
 
 

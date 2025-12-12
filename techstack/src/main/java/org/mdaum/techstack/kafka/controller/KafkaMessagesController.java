@@ -30,9 +30,15 @@ public class KafkaMessagesController {
     }
 
     @ResponseStatus(HttpStatus.OK)
-    @PostMapping(value = "produce-multiple", consumes = MediaType.APPLICATION_NDJSON_VALUE)
-    public void produceKafkaMessages(@RequestBody Flux<KafkaInputMessageDto> kafkaInputMessageDtoFlux) {
-        kafkaService.produceKafkaMessages(kafkaInputMessageDtoFlux);
+    @PostMapping(value = "produce-multiple-flux", consumes = MediaType.APPLICATION_NDJSON_VALUE)
+    public void produceKafkaMessageFlux(@RequestBody Flux<KafkaInputMessageDto> kafkaInputMessageDtoFlux) {
+        kafkaService.produceKafkaMessageFlux(kafkaInputMessageDtoFlux);
+    }
+
+    @ResponseStatus(HttpStatus.OK)
+    @PostMapping(value = "produce-multiple", consumes = MediaType.APPLICATION_JSON_VALUE)
+    public void produceKafkaMessages(@RequestBody List<KafkaInputMessageDto> kafkaInputMessageDtos) {
+        kafkaService.produceKafkaMessages(kafkaInputMessageDtos);
     }
 
     @GetMapping(path="stream/by-topic", produces = MediaType.APPLICATION_NDJSON_VALUE)
@@ -40,7 +46,18 @@ public class KafkaMessagesController {
     public Flux<KafkaOutputMessageDto> streamKafkaMessagesByTopic(
             @RequestParam("topicNames") List<String> topicNames,
             @RequestParam(value = "consumerGroup", required = false) String consumerGroup,
-            @RequestParam(value = "maxMessages", defaultValue = "0") int maxMessages) {
-        return kafkaService.streamKafkaMessagesByTopics(topicNames, Optional.ofNullable(consumerGroup), maxMessages);
+            @RequestParam(value = "fromBeginning", defaultValue = "false") boolean fromBeginning,
+            @RequestParam(value = "pollTimeoutSeconds", defaultValue="5") int pollTimeoutSeconds) {
+        return kafkaService.streamKafkaMessagesByTopics(topicNames, Optional.ofNullable(consumerGroup), fromBeginning, pollTimeoutSeconds);
+    }
+
+    @GetMapping(path="get/by-topic", produces = MediaType.APPLICATION_JSON_VALUE)
+    @ResponseBody
+    public List<KafkaOutputMessageDto> getKafkaMessagesByTopic(
+            @RequestParam("topicNames") List<String> topicNames,
+            @RequestParam(value = "consumerGroup", required = false) String consumerGroup,
+            @RequestParam(value = "fromBeginning", defaultValue = "false") boolean fromBeginning,
+            @RequestParam(value = "pollTimeoutSeconds", defaultValue="5") int pollTimeoutSeconds) {
+        return kafkaService.getKafkaMessages(topicNames, Optional.ofNullable(consumerGroup), fromBeginning, pollTimeoutSeconds);
     }
 }
