@@ -17,13 +17,15 @@ import org.springframework.http.codec.multipart.FilePart;
 import org.springframework.stereotype.Component;
 import org.springframework.web.multipart.MultipartFile;
 import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
+import software.amazon.awssdk.core.async.AsyncRequestBody;
 import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.core.sync.ResponseTransformer;
 import software.amazon.awssdk.http.ContentStreamProvider;
 import software.amazon.awssdk.services.s3.S3AsyncClient;
 import software.amazon.awssdk.services.s3.S3Client;
-import software.amazon.awssdk.services.s3.model.GetObjectRequest;
-import software.amazon.awssdk.services.s3.model.PutObjectRequest;
+import software.amazon.awssdk.services.s3.model.*;
+import software.amazon.awssdk.core.async.AsyncResponseTransformer;
 
 import java.io.*;
 import java.nio.ByteBuffer;
@@ -92,40 +94,117 @@ public class S3ServiceImpl implements S3Service {
     }
 
     @Override
-    public void uploadMultipartFileReactive(S3Request s3UploadObjectRequest, Flux<FilePart> filesFlux) {
+    public Mono<Void> uploadMultipartFileReactive(S3Request s3UploadObjectRequest, Flux<FilePart> filesFlux) {
 
         String targetPath = getS3PathStringFromConfigAndS3Request(s3UploadObjectRequest);
+        String bucket = s3ConfigurationProperties.bucketName();
 
-        PipedOutputStream osPipe = new PipedOutputStream();
-        PipedInputStream isPipe;
+        LOGGER.info("Starting S3 multipart upload to s3://{}/{}", bucket, targetPath);
 
-        try {
-            isPipe = new PipedInputStream(osPipe);
-        } catch (IOException e) {
-            throw new RuntimeException(e);
-        }
+        // Step 1: Initiate multipart upload
+        CreateMultipartUploadRequest createRequest = CreateMultipartUploadRequest.builder()
+                .bucket(bucket)
+                .key(targetPath)
+                .contentType(MediaType.APPLICATION_OCTET_STREAM_VALUE)
+                .build();
 
-        RequestBody body = RequestBody.fromContentProvider(
-                ContentStreamProvider.fromInputStream(isPipe), MediaType.APPLICATION_OCTET_STREAM_VALUE);
+        return Mono.fromFuture(s3AsyncClient.createMultipartUpload(createRequest))
+                .flatMap(createResponse -> {
+                    String uploadId = createResponse.uploadId();
+                    LOGGER.info("Initiated multipart upload with ID: {}", uploadId);
 
-        s3Client.putObject(b -> b.bucket(s3ConfigurationProperties.bucketName()).key(targetPath), body);
+                    // Step 2: Upload each FilePart as a separate S3 part
+                    // We collect ByteBuffers for each part individually (not all at once)
+                    Flux<CompletedPart> completedPartsFlux = filesFlux
+                            .index() // Add index to track part numbers (0-based)
+                            .concatMap(tuple -> {
+                                long index = tuple.getT1();
+                                FilePart filePart = tuple.getT2();
+                                int partNumber = (int) (index + 1); // S3 part numbers are 1-based
 
-        LOGGER.info("Uploading multipart into {}/{}", s3ConfigurationProperties.bucketName(), targetPath);
+                                LOGGER.info("Processing file part {}: {}", partNumber, filePart.filename());
 
-        Flux<InputStream> fluxInputStreams = filesFlux.flatMap(filePart ->
-                filePart.content().map(dataBuffer ->
-                    dataBuffer.asInputStream())
-        ).doOnNext(
-                is -> {
-                    try {
-                        is.transferTo(osPipe);
-                    } catch (IOException e) {
-                        throw new RuntimeException(e);
-                    }
-                }
-        );
-//
-//        throw new RuntimeException("Not implemented yet");
+                                // Collect all ByteBuffers for this specific FilePart
+                                // This buffers ONE part at a time, not all parts
+                                return filePart.content()
+                                        .map(dataBuffer -> {
+                                            ByteBuffer byteBuffer = dataBuffer.asByteBuffer();
+                                            DataBufferUtils.release(dataBuffer);
+                                            return byteBuffer;
+                                        })
+                                        .collectList()
+                                        .flatMap(byteBuffers -> {
+                                            // Calculate size of this part
+                                            long partSize = byteBuffers.stream()
+                                                    .mapToLong(ByteBuffer::remaining)
+                                                    .sum();
+
+                                            LOGGER.info("Uploading part {} with size: {} bytes", partNumber, partSize);
+
+                                            // Create a combined ByteBuffer for this part
+                                            ByteBuffer combinedBuffer = ByteBuffer.allocate((int) partSize);
+                                            byteBuffers.forEach(combinedBuffer::put);
+                                            combinedBuffer.flip();
+
+                                            // Upload this part
+                                            UploadPartRequest uploadPartRequest = UploadPartRequest.builder()
+                                                    .bucket(bucket)
+                                                    .key(targetPath)
+                                                    .uploadId(uploadId)
+                                                    .partNumber(partNumber)
+                                                    .contentLength(partSize)
+                                                    .build();
+
+                                            return Mono.fromFuture(
+                                                    s3AsyncClient.uploadPart(
+                                                            uploadPartRequest,
+                                                            AsyncRequestBody.fromByteBuffer(combinedBuffer)
+                                                    )
+                                            ).map(uploadPartResponse -> {
+                                                LOGGER.info("Uploaded part {} with ETag: {}", partNumber, uploadPartResponse.eTag());
+                                                return CompletedPart.builder()
+                                                        .partNumber(partNumber)
+                                                        .eTag(uploadPartResponse.eTag())
+                                                        .build();
+                                            });
+                                        });
+                            });
+
+                    // Step 3: Collect all completed parts and complete the multipart upload
+                    return completedPartsFlux
+                            .collectList()
+                            .flatMap(completedParts -> {
+                                LOGGER.info("All {} parts uploaded, completing multipart upload", completedParts.size());
+
+                                CompletedMultipartUpload completedMultipartUpload = CompletedMultipartUpload.builder()
+                                        .parts(completedParts)
+                                        .build();
+
+                                CompleteMultipartUploadRequest completeRequest = CompleteMultipartUploadRequest.builder()
+                                        .bucket(bucket)
+                                        .key(targetPath)
+                                        .uploadId(uploadId)
+                                        .multipartUpload(completedMultipartUpload)
+                                        .build();
+
+                                return Mono.fromFuture(s3AsyncClient.completeMultipartUpload(completeRequest));
+                            })
+                            .doOnSuccess(response ->
+                                    LOGGER.info("Successfully completed multipart upload to s3://{}/{}", bucket, targetPath)
+                            )
+                            .onErrorResume(error -> {
+                                // If anything fails, abort the multipart upload to avoid orphaned parts
+                                LOGGER.error("Error during multipart upload, aborting upload ID: {}", uploadId, error);
+                                AbortMultipartUploadRequest abortRequest = AbortMultipartUploadRequest.builder()
+                                        .bucket(bucket)
+                                        .key(targetPath)
+                                        .uploadId(uploadId)
+                                        .build();
+                                return Mono.fromFuture(s3AsyncClient.abortMultipartUpload(abortRequest))
+                                        .then(Mono.error(error));
+                            });
+                })
+                .then();
     }
 
     @Override

@@ -17,6 +17,7 @@ import org.springframework.http.codec.multipart.FilePart;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
 
 import java.io.InputStream;
 import java.nio.ByteBuffer;
@@ -46,25 +47,16 @@ public class S3Controller {
     }
 
     @PostMapping(value = "upload-multipart-file-reactive", consumes = { MediaType.MULTIPART_FORM_DATA_VALUE })
-    public void uploadMultipartFile(@RequestPart("s3Request") String s3UploadObjectRequest,
-                                    @RequestPart("file") Flux<FilePart> files) {
-
-//        files.doOnNext(
-//                file -> file.content().doOnNext(
-//                        dataBuffer -> {
-//                            byte[] bytes = new byte[dataBuffer.readableByteCount()];
-//                            dataBuffer.read(bytes);
-//                            DataBufferUtils.release(dataBuffer);
-//                            LOGGER.info(new String(bytes, StandardCharsets.UTF_8));
-//                        }
-//                ).subscribe()
-//        ).subscribe();
+    public Mono<Void> uploadMultipartFile(@RequestPart("s3Request") String s3UploadObjectRequest,
+                                          @RequestPart("file") Flux<FilePart> files) {
 
         try {
-
-            s3Service.uploadMultipartFileReactive(ObjectMappers.GENERAL.readValue(s3UploadObjectRequest, S3Request.class), files);
+            S3Request s3Request = ObjectMappers.GENERAL.readValue(s3UploadObjectRequest, S3Request.class);
+            LOGGER.info("Received reactive multipart upload request for file: {}", s3Request.getFileName());
+            return s3Service.uploadMultipartFileReactive(s3Request, files);
         } catch (JsonProcessingException e) {
-            throw new RuntimeException(e);
+            LOGGER.error("Error parsing S3Request JSON", e);
+            return Mono.error(new RuntimeException("Invalid S3Request format", e));
         }
     }
 

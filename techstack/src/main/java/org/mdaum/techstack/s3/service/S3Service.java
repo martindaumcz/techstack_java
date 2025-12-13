@@ -7,6 +7,7 @@ import org.springframework.http.codec.multipart.FilePart;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
 
 import java.io.InputStream;
 
@@ -16,8 +17,8 @@ public interface S3Service {
 
     void uploadString(@RequestBody S3UploadStringRequest s3UploadStringRequest);
 
-    void uploadMultipartFileReactive(@RequestPart S3Request s3UploadObjectRequest,
-                                     @RequestPart Flux<FilePart> files);
+    Mono<Void> uploadMultipartFileReactive(@RequestPart S3Request s3UploadObjectRequest,
+                                           @RequestPart Flux<FilePart> files);
 
     void uploadMultipartFile(@RequestPart S3Request s3UploadObjectRequest,
                                      @RequestPart MultipartFile[] files);
