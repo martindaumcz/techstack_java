@@ -10,7 +10,7 @@ public interface KafkaService {
 
     void produceKafkaMessage(KafkaInputMessageDto kafkaMessage);
     void produceKafkaMessages(List<KafkaInputMessageDto> kafkaInputMessageDtos);
-    void produceKafkaMessageFlux(Flux<KafkaInputMessageDto> kafkaInputMessageDtoFlux);
+    reactor.core.publisher.Mono<Void> produceKafkaMessageFlux(Flux<KafkaInputMessageDto> kafkaInputMessageDtoFlux);
     List<KafkaOutputMessageDto> getKafkaMessages(List<String> topics, Optional<String> consumerGroup, boolean fromBeginning, int pollTimeoutSeconds);
     Flux<KafkaOutputMessageDto> streamKafkaMessagesByTopics(List<String> topic, Optional<String> consumerGroup, boolean fromBeginning, int pollTimeoutSeconds);
     void createKafkaTopics(List<KafkaTopicDto> kafkaTopics);

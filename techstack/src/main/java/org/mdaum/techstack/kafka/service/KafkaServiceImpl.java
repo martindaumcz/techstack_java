@@ -21,6 +21,7 @@ import org.springframework.kafka.support.SendResult;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
 import reactor.kafka.receiver.KafkaReceiver;
 import reactor.kafka.receiver.ReceiverOptions;
 import reactor.kafka.receiver.ReceiverRecord;
@@ -72,12 +73,12 @@ public class KafkaServiceImpl implements KafkaService{
     }
 
     @Override
-    public void produceKafkaMessageFlux(Flux<KafkaInputMessageDto> kafkaInputMessageDtoFlux) {
+    public Mono<Void> produceKafkaMessageFlux(Flux<KafkaInputMessageDto> kafkaInputMessageDtoFlux) {
         SenderOptions<String, Object> senderOptions = SenderOptions.create(kafkaProducerBaseConfig.createConfigurationMap());
 
         KafkaSender<String, Object> kafkaSender = KafkaSender.create(senderOptions);
 
-        kafkaSender.send(kafkaInputMessageDtoFlux
+        return kafkaSender.send(kafkaInputMessageDtoFlux
                         .doOnNext(next -> LOGGER.info("Sending input message for topic [{}]: {}:{}", next.topic(), next.key(), next.content()))
                         .map(dto -> SenderRecord.create(
                                 new ProducerRecord<>(dto.topic(),
@@ -88,7 +89,10 @@ public class KafkaServiceImpl implements KafkaService{
                                 dto.key()
                         )))
                 .doOnNext(next -> LOGGER.info("Sent input message to topic: {}", next.recordMetadata().topic()))
-                .subscribe();
+                .doOnError(error -> LOGGER.error("Error sending messages to Kafka", error))
+                .doOnComplete(() -> LOGGER.info("Completed sending all messages to Kafka"))
+                .then()
+                .doFinally(signalType -> kafkaSender.close());
     }
 
     @Override
@@ -157,7 +161,6 @@ public class KafkaServiceImpl implements KafkaService{
                         null,
                         consumerGroupStr));
         });
-
         return outputMsgs;
     }
 
@@ -194,7 +197,6 @@ public class KafkaServiceImpl implements KafkaService{
                                 kafkaOutputMessageDto.topic()));
 
         LOGGER.info("Returning output flux");
-
         return outputMsgFlux;
     }
 
@@ -230,5 +232,4 @@ public class KafkaServiceImpl implements KafkaService{
             throw new RuntimeException(e);
         }
     }
-
 }

@@ -3,11 +3,14 @@ package org.mdaum.techstack.kafka.controller;
 import org.mdaum.techstack.kafka.model.KafkaInputMessageDto;
 import org.mdaum.techstack.kafka.model.KafkaOutputMessageDto;
 import org.mdaum.techstack.kafka.service.KafkaService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.*;
 import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
 
 import java.util.List;
 import java.util.Optional;
@@ -15,6 +18,8 @@ import java.util.Optional;
 @RestController
 @RequestMapping("kafka/messages")
 public class KafkaMessagesController {
+
+    private static Logger LOGGER = LoggerFactory.getLogger(KafkaMessagesController.class);
 
     private KafkaService kafkaService;
 
@@ -31,8 +36,18 @@ public class KafkaMessagesController {
 
     @ResponseStatus(HttpStatus.OK)
     @PostMapping(value = "produce-multiple-flux", consumes = MediaType.APPLICATION_NDJSON_VALUE)
-    public void produceKafkaMessageFlux(@RequestBody Flux<KafkaInputMessageDto> kafkaInputMessageDtoFlux) {
-        kafkaService.produceKafkaMessageFlux(kafkaInputMessageDtoFlux);
+    public Mono<Void> produceKafkaMessageFlux(@RequestBody Flux<KafkaInputMessageDto> kafkaInputMessageDtoFlux) {
+        return kafkaService.produceKafkaMessageFlux(kafkaInputMessageDtoFlux);
+    }
+
+    @ResponseStatus(HttpStatus.OK)
+    @PostMapping(value = "flux-test", consumes = MediaType.APPLICATION_NDJSON_VALUE, produces = MediaType.APPLICATION_NDJSON_VALUE)
+    public Flux<KafkaOutputMessageDto> fluxTest(@RequestBody Flux<KafkaInputMessageDto> kafkaInputMessageDtoFlux) {
+        return kafkaInputMessageDtoFlux
+                .doOnNext(next -> LOGGER.info("consuming test dto {}", next))
+                .doOnError(error -> LOGGER.error("Error consuming flux", error))
+                .doOnComplete(() -> LOGGER.info("Completed consuming flux"))
+                .map(dto -> new KafkaOutputMessageDto(dto.key(), dto.topic(), dto.content(), null, null));
     }
 
     @ResponseStatus(HttpStatus.OK)

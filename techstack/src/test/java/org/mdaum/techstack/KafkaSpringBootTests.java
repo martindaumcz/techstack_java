@@ -59,9 +59,7 @@ public class KafkaSpringBootTests {
                 .getStatus();
 
         webClientGet.orTimeout(15, TimeUnit.SECONDS);
-
     }
-
 
     @Test
     void kafkaFluxProduceConsumeTest() throws InterruptedException {
@@ -86,7 +84,6 @@ public class KafkaSpringBootTests {
 
         kafkaService.produceKafkaMessageFlux(inputMessageFlux);
     }
-
 
 //    @Test
 //    void produceMultipleKafkaRecords() {
