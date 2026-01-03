@@ -7,17 +7,18 @@ import org.mdaum.techstack.kafka.service.KafkaService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.client.RestClientTest;
 import org.springframework.boot.test.autoconfigure.web.reactive.AutoConfigureWebTestClient;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.context.annotation.Bean;
+import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.reactive.server.WebTestClient;
+import org.springframework.web.reactive.function.BodyInserters;
 import reactor.core.publisher.Flux;
 import reactor.test.StepVerifier;
 
+import java.time.Duration;
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
@@ -30,35 +31,39 @@ public class KafkaSpringBootTests {
 
     private static Logger LOGGER = LoggerFactory.getLogger(KafkaSpringBootTests.class);
 
+    private static final String MSG_1 = "mdaum message 1";
+    private static final String MSG_2 = "mdaum message 2";
+
+    private static KafkaInputMessageDto dto1 = new KafkaInputMessageDto("my-key-001", "mdaum-topic-001", "mdaum message 1");
+    private static KafkaInputMessageDto dto2 = new KafkaInputMessageDto("my-key-001", "mdaum-topic-001", "mdaum message 2");
+
     @Autowired
     private KafkaService kafkaService;
 
     @Test
-    public void kafkaProduceConsumeTest(@Autowired WebTestClient webClient) {
+    public void kafkaProduceConsumeFluxTest(@Autowired WebTestClient webClient, @Autowired WebTestClient webClient2) {
 
-        KafkaInputMessageDto dto1 = new KafkaInputMessageDto("my-key-001", "mdaum-topic-001", "verga 1");
-        KafkaInputMessageDto dto2 = new KafkaInputMessageDto("my-key-001", "mdaum-topic-001", "verga 2");
+        webClient.mutate().responseTimeout(Duration.ofSeconds(7)).build()
+                .get()
+                .uri("/kafka/messages/stream/by-topic?topicNames=mdaum-topic-001&pollTimeoutSeconds=3")
+                .exchange()
+                .returnResult(new ParameterizedTypeReference<KafkaOutputMessageDto>() {
+                }).getResponseBody().doOnNext(next -> LOGGER.info("Received kafka message {}", next));
 
-        CompletableFuture<Void> webClientGet = CompletableFuture.runAsync(() -> {
-            WebTestClient.BodyContentSpec spec = webClient.get()
-                    .uri("/kafka/messages/get/by-topic?topicNames=mdaum-topic-001&pollTimeoutSeconds=10")
-                    .exchange()
-                    .expectStatus().isOk()
-                    .expectBody().jsonPath("$[*]").isNotEmpty();
+        LOGGER.info("Finished receiving kafka message flux");
 
-            LOGGER.info("Received messages: {}", spec.returnResult().getResponseBody());
-        }, Executors.newSingleThreadExecutor());
+        Flux<KafkaInputMessageDto> inputMessageFlux = Flux.fromIterable(List.of(dto1, dto2))
+                .doOnNext(next -> LOGGER.info("Sending dto {}", next))
+                .doOnComplete(() -> LOGGER.info("Done sending DTOs"));
 
-        HttpStatusCode statusCode = webClient.post()
-                .uri("/kafka/messages/produce-multiple")
-                .contentType(MediaType.APPLICATION_JSON)
-                .bodyValue(List.of(dto1, dto2))
+        HttpStatusCode statusCode = webClient2.post()
+                .uri("/kafka/messages/produce-multiple-flux")
+                .contentType(MediaType.APPLICATION_NDJSON)
+                .body(BodyInserters.fromPublisher(inputMessageFlux, KafkaInputMessageDto.class))
                 .exchange()
                 .expectStatus().isOk()
                 .returnResult(Void.class)
                 .getStatus();
-
-        webClientGet.orTimeout(15, TimeUnit.SECONDS);
     }
 
     @Test

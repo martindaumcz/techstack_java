@@ -1,5 +1,7 @@
 plugins {
 	java
+	// Note: Plugin versions must be literal strings due to Gradle restrictions
+	// Update these manually when needed
 	id("org.springframework.boot") version "3.5.7"
 	id("io.spring.dependency-management") version "1.1.7"
 }
@@ -18,7 +20,11 @@ repositories {
 	mavenCentral()
 }
 
-extra["netflixDgsVersion"] = "10.4.0"
+// Load dependency versions from gradle.properties
+val netflixDgsVersion: String by project
+val awsSdkVersion: String by project
+val awsSdkRegionsVersion: String by project
+val reactorKafkaVersion: String by project
 
 dependencies {
 	implementation("org.springframework.boot:spring-boot-starter-data-jpa")
@@ -35,18 +41,18 @@ dependencies {
 	testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 
     //aws sdk
-    implementation("software.amazon.awssdk:regions:2.38.2")
-    implementation("software.amazon.awssdk:sqs:2.38.3")
-    implementation("software.amazon.awssdk:s3:2.38.3")
-    implementation("software.amazon.awssdk:s3-transfer-manager:2.38.3")
+    implementation("software.amazon.awssdk:regions:$awsSdkRegionsVersion")
+    implementation("software.amazon.awssdk:sqs:$awsSdkVersion")
+    implementation("software.amazon.awssdk:s3:$awsSdkVersion")
+    implementation("software.amazon.awssdk:s3-transfer-manager:$awsSdkVersion")
 
     //reactor and kafka
-    implementation("io.projectreactor.kafka:reactor-kafka:1.3.25")
+    implementation("io.projectreactor.kafka:reactor-kafka:$reactorKafkaVersion")
 }
 
 dependencyManagement {
 	imports {
-		mavenBom("com.netflix.graphql.dgs:graphql-dgs-platform-dependencies:${property("netflixDgsVersion")}")
+		mavenBom("com.netflix.graphql.dgs:graphql-dgs-platform-dependencies:$netflixDgsVersion")
 	}
 }
 

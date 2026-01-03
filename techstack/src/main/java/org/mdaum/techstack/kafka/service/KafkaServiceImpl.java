@@ -3,32 +3,34 @@ package org.mdaum.techstack.kafka.service;
 import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.admin.NewTopic;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
-import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.logging.log4j.util.Strings;
+import org.mdaum.techstack.kafka.configuration.KafkaConfigurationProperties;
 import org.mdaum.techstack.kafka.configuration.KafkaConsumerBaseConfig;
 import org.mdaum.techstack.kafka.configuration.KafkaProducerBaseConfig;
-import org.mdaum.techstack.kafka.model.*;
+import org.mdaum.techstack.kafka.exception.RecordProcessingException;
+import org.mdaum.techstack.kafka.exception.RecoverableException;
+import org.mdaum.techstack.kafka.exception.UnrecoverableException;
+import org.mdaum.techstack.kafka.model.KafkaInputMessageDto;
+import org.mdaum.techstack.kafka.model.KafkaOutputMessageDto;
+import org.mdaum.techstack.kafka.model.KafkaTopicDescriptionDto;
+import org.mdaum.techstack.kafka.model.KafkaTopicDto;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.kafka.core.KafkaAdmin;
 import org.springframework.kafka.core.KafkaTemplate;
-import org.springframework.kafka.core.ProducerFactory;
 import org.springframework.kafka.support.SendResult;
 import org.springframework.stereotype.Component;
-import org.springframework.util.StringUtils;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.kafka.receiver.KafkaReceiver;
 import reactor.kafka.receiver.ReceiverOptions;
-import reactor.kafka.receiver.ReceiverRecord;
 import reactor.kafka.sender.KafkaSender;
 import reactor.kafka.sender.SenderOptions;
 import reactor.kafka.sender.SenderRecord;
-import reactor.kafka.sender.SenderResult;
+import reactor.util.retry.Retry;
 
 import java.time.Duration;
 import java.util.*;
@@ -41,6 +43,7 @@ public class KafkaServiceImpl implements KafkaService{
 
     private KafkaConsumerBaseConfig kafkaConsumerBaseConfig;
     private KafkaProducerBaseConfig kafkaProducerBaseConfig;
+    private KafkaConfigurationProperties kafkaConfigurationProperties;
     private AdminClient kafkaAdminClient;
     private KafkaTemplate<String, String> kafkaTemplate;
 
@@ -49,11 +52,13 @@ public class KafkaServiceImpl implements KafkaService{
             KafkaConsumerBaseConfig kafkaConsumerBaseConfig,
             AdminClient kafkaAdminClient,
             KafkaTemplate<String, String> kafkaTemplate,
-            KafkaProducerBaseConfig kafkaProducerBaseConfig) {
+            KafkaProducerBaseConfig kafkaProducerBaseConfig,
+            KafkaConfigurationProperties kafkaConfigurationProperties) {
         this.kafkaConsumerBaseConfig = kafkaConsumerBaseConfig;
         this.kafkaAdminClient = kafkaAdminClient;
         this.kafkaTemplate = kafkaTemplate;
         this.kafkaProducerBaseConfig = kafkaProducerBaseConfig;
+        this.kafkaConfigurationProperties = kafkaConfigurationProperties;
     }
 
     @Override
@@ -183,18 +188,44 @@ public class KafkaServiceImpl implements KafkaService{
         ReceiverOptions<Object, Object> receiverOptions = ReceiverOptions.create(consumerBaseConfigMap)
                 .subscription(topics);
         KafkaReceiver<Object, Object> kafkaReceiver = KafkaReceiver.create(receiverOptions);
-        Flux<KafkaOutputMessageDto> outputMsgFlux = kafkaReceiver.receive()
-                .map(record -> new KafkaOutputMessageDto(
+        Flux<KafkaOutputMessageDto> outputMsgFlux = kafkaReceiver
+                .receive()
+                //.timeout(Duration.ofSeconds(pollTimeoutSeconds), Mono.empty())
+                .flatMap(receiverRecord ->
+                    Mono.fromCallable(() -> {
+                        int random = new Random().ints(0, 100).findFirst().getAsInt();
+                        if (receiverRecord.value().toString().contains("recoverable error")) {
+                            LOGGER.info("Deciding whether to throw a recoverable exception - is {} 90 or less?", random);
+                            if (random <= 90) {
+                                LOGGER.info("Throwing a recoverable exception");
+                                throw new RecoverableException(String.format("deliberate recoverable error in message %s", receiverRecord));
+                            }
+                        }
+                        if (receiverRecord.value().toString().contains("fatal error")) {
+                            throw new UnrecoverableException(String.format("deliberate fatal error in message %s", receiverRecord));
+                        }
+                        return receiverRecord;
+                    })
+                    .retryWhen(
+                        Retry.fixedDelay(50, Duration.ofMillis(20))
+                                .filter(RecoverableException.class::isInstance)
+                                .doBeforeRetry(signal -> LOGGER.info("Retrying message - attempt {}", signal.totalRetries() + 1))
+                                .doAfterRetry(signal -> LOGGER.info("Completed retry attempt {}", signal.totalRetries()))
+                                .onRetryExhaustedThrow((spec, signal) -> signal.failure()))
+                    .doOnError(RecoverableException.class, ex -> LOGGER.error("Retry exhausted for recoverable error", ex))
+                    .onErrorResume(UnrecoverableException.class, ex -> {
+                        LOGGER.error("Unrecoverable error processing message, skipping", ex);
+                        return Mono.empty(); // Skip this message and continue with the stream
+                    })
+                    .map(record -> new KafkaOutputMessageDto(
                         record.key().toString(),
                         record.topic(),
                         record.value().toString(),
                         null,
-                        null
-                )).doOnNext(kafkaOutputMessageDto ->
-                        LOGGER.info("Consumed message {}:{} from topic {}",
-                                kafkaOutputMessageDto.key(),
-                                kafkaOutputMessageDto.content(),
-                                kafkaOutputMessageDto.topic()));
+                        null))
+                );
+
+
 
         LOGGER.info("Returning output flux");
         return outputMsgFlux;
