@@ -5,6 +5,7 @@ import org.mdaum.techstack.kafka.exception.UnrecoverableException;
 import org.mdaum.techstack.kafka.model.KafkaOutputMessageDto;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -18,6 +19,13 @@ import java.util.Random;
 public class KafkaRecordProcessor {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(KafkaRecordProcessor.class);
+
+    private final DeadLetterTopicProducer deadLetterTopicProducer;
+
+    @Autowired
+    public KafkaRecordProcessor(DeadLetterTopicProducer deadLetterTopicProducer) {
+        this.deadLetterTopicProducer = deadLetterTopicProducer;
+    }
 
     public Flux<KafkaOutputMessageDto> processRecords(Flux<ReceiverRecord<Object, Object>> recordFlux) {
         // here concatMap is necessary to process records sequentially (rather than flatMap, which does so concurrently
@@ -46,10 +54,19 @@ public class KafkaRecordProcessor {
                                         .doBeforeRetry(signal -> LOGGER.info("Retrying message - attempt {}", signal.totalRetries() + 1))
                                         .doAfterRetry(signal -> LOGGER.info("Completed retry attempt {}", signal.totalRetries()))
                                         .onRetryExhaustedThrow((spec, signal) -> signal.failure()))
-                        .doOnError(RecoverableException.class, ex -> LOGGER.error("Retry exhausted for recoverable error", ex))
+                        .onErrorResume(RecoverableException.class, ex -> {
+                            LOGGER.error("Retry exhausted for recoverable error, sending to DLT", ex);
+                            return deadLetterTopicProducer.sendToRecoverableDLT(receiverRecord, ex)
+                                    .doOnSuccess(v -> LOGGER.info("Successfully sent record to recoverable DLT"))
+                                    .doOnError(dltError -> LOGGER.error("Failed to send to recoverable DLT", dltError))
+                                    .then(Mono.empty()); // Skip this message and continue with the stream
+                        })
                         .onErrorResume(UnrecoverableException.class, ex -> {
-                            LOGGER.error("Unrecoverable error processing message, terminating", ex);
-                            return Mono.error(ex); // Skip this message and continue with the stream
+                            LOGGER.error("Unrecoverable error processing message, sending to DLT and terminating", ex);
+                            return deadLetterTopicProducer.sendToUnrecoverableDLT(receiverRecord, ex)
+                                    .doOnSuccess(v -> LOGGER.info("Successfully sent record to unrecoverable DLT"))
+                                    .doOnError(dltError -> LOGGER.error("Failed to send to unrecoverable DLT", dltError))
+                                    .then(Mono.error(ex)); // Terminate the flux
                         })
                         .map(record -> new KafkaOutputMessageDto(
                                 record.key().toString(),
