@@ -46,6 +46,7 @@ public class KafkaServiceImpl implements KafkaService{
     private KafkaConfigurationProperties kafkaConfigurationProperties;
     private AdminClient kafkaAdminClient;
     private KafkaTemplate<String, String> kafkaTemplate;
+    private KafkaRecordProcessor kafkaRecordProcessor;
 
     @Autowired
     public KafkaServiceImpl(
@@ -53,12 +54,14 @@ public class KafkaServiceImpl implements KafkaService{
             AdminClient kafkaAdminClient,
             KafkaTemplate<String, String> kafkaTemplate,
             KafkaProducerBaseConfig kafkaProducerBaseConfig,
-            KafkaConfigurationProperties kafkaConfigurationProperties) {
+            KafkaConfigurationProperties kafkaConfigurationProperties,
+            KafkaRecordProcessor kafkaRecordProcessor) {
         this.kafkaConsumerBaseConfig = kafkaConsumerBaseConfig;
         this.kafkaAdminClient = kafkaAdminClient;
         this.kafkaTemplate = kafkaTemplate;
         this.kafkaProducerBaseConfig = kafkaProducerBaseConfig;
         this.kafkaConfigurationProperties = kafkaConfigurationProperties;
+        this.kafkaRecordProcessor = kafkaRecordProcessor;
     }
 
     @Override
@@ -191,41 +194,8 @@ public class KafkaServiceImpl implements KafkaService{
         Flux<KafkaOutputMessageDto> outputMsgFlux = kafkaReceiver
                 .receive()
                 //.timeout(Duration.ofSeconds(pollTimeoutSeconds), Mono.empty())
-                .flatMap(receiverRecord ->
-                    Mono.fromCallable(() -> {
-                        int random = new Random().ints(0, 100).findFirst().getAsInt();
-                        if (receiverRecord.value().toString().contains("recoverable error")) {
-                            LOGGER.info("Deciding whether to throw a recoverable exception - is {} 90 or less?", random);
-                            if (random <= 90) {
-                                LOGGER.info("Throwing a recoverable exception");
-                                throw new RecoverableException(String.format("deliberate recoverable error in message %s", receiverRecord));
-                            }
-                        }
-                        if (receiverRecord.value().toString().contains("fatal error")) {
-                            throw new UnrecoverableException(String.format("deliberate fatal error in message %s", receiverRecord));
-                        }
-                        return receiverRecord;
-                    })
-                    .retryWhen(
-                        Retry.fixedDelay(50, Duration.ofMillis(20))
-                                .filter(RecoverableException.class::isInstance)
-                                .doBeforeRetry(signal -> LOGGER.info("Retrying message - attempt {}", signal.totalRetries() + 1))
-                                .doAfterRetry(signal -> LOGGER.info("Completed retry attempt {}", signal.totalRetries()))
-                                .onRetryExhaustedThrow((spec, signal) -> signal.failure()))
-                    .doOnError(RecoverableException.class, ex -> LOGGER.error("Retry exhausted for recoverable error", ex))
-                    .onErrorResume(UnrecoverableException.class, ex -> {
-                        LOGGER.error("Unrecoverable error processing message, skipping", ex);
-                        return Mono.empty(); // Skip this message and continue with the stream
-                    })
-                    .map(record -> new KafkaOutputMessageDto(
-                        record.key().toString(),
-                        record.topic(),
-                        record.value().toString(),
-                        null,
-                        null))
-                );
-
-
+                .transform(f -> kafkaRecordProcessor.processRecords(f))
+                .doOnNext(next -> LOGGER.info("Successfully Processed record {}", next));
 
         LOGGER.info("Returning output flux");
         return outputMsgFlux;

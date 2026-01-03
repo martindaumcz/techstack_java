@@ -28,6 +28,7 @@ public class KafkaAdHocTests {
     private static final String MSG_1 = "mdaum message 1";
     private static final String MSG_2 = "mdaum message 2";
     private static final String MSG_ERROR = "mdaum message recoverable error blabla";
+    private static final String MSG_3 = "mdaum message 3";
     private static final String MSG_FATAL_ERROR = "mdaum message fatal error blabla";
 
     private static final String TOPIC = "mdaum-topic-001";
@@ -38,6 +39,7 @@ public class KafkaAdHocTests {
     private static KafkaInputMessageDto dto1 = new KafkaInputMessageDto(KEY, TOPIC, MSG_1);
     private static KafkaInputMessageDto dto2 = new KafkaInputMessageDto(KEY, TOPIC, MSG_2);
     private static KafkaInputMessageDto errorDto = new KafkaInputMessageDto(KEY, TOPIC, MSG_ERROR);
+    private static KafkaInputMessageDto dto3 = new KafkaInputMessageDto(KEY, TOPIC, MSG_3);
     private static KafkaInputMessageDto fatalErrorDto = new KafkaInputMessageDto(KEY, TOPIC, MSG_FATAL_ERROR);
 
     private WebClient webClient = WebClient.builder().baseUrl(KAFKA_BASE_URL).build();
@@ -102,7 +104,7 @@ public class KafkaAdHocTests {
     @Test
     public void produceAndCosumeFluxWithErrors() {
 
-        Flux<KafkaInputMessageDto> inputMessageFlux = Flux.fromIterable(List.of(dto1, errorDto, fatalErrorDto, dto2))
+        Flux<KafkaInputMessageDto> inputMessageFlux = Flux.fromIterable(List.of(dto1, errorDto, dto2, fatalErrorDto, dto3))
                 .doOnNext(next -> LOGGER.info("Sending dto {}", next))
                 .doOnComplete(() -> LOGGER.info("Done sending DTOs"));
 
